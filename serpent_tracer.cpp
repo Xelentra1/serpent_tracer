@@ -309,5 +309,5 @@ int main(int argc, char* argv[]) {
 	return 0;
 }
 
-// c:\pin\pin.exe -smc_strict 1 -t serpent_tracer.dll -- serpentine.exe ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef
-// c:\pin\pin.exe -smc_strict 1 -t serpent_tracer.dll -clean 1 -- serpentine.exe ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef
+// pin.exe -smc_strict 1 -t serpent_tracer.dll -- serpentine.exe ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef
+// pin.exe -smc_strict 1 -t serpent_tracer.dll -clean 1 -- serpentine.exe ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef
