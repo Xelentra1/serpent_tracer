@@ -7,8 +7,8 @@ This tool is specifically designed to trace instructions for Challenge 9 from th
 ## Features
 
 - **Stop and Resume Tracing**: Automatically pauses on `hlt` and resumes on `call rax` into the shellcode.
-- **Self-Modification Patching**: Sets register values to `0` when encountering `test reg, reg` within the shellcode, ensuring continuous shellcode execution.
-- **Configurable Tracing**: Allows for clean traces that exclude self-modifying instructions from the trace.
+- **Patch checks for correct user input**: Sets register values to `0` when encountering `test reg, reg` within the shellcode, ensuring continuous shellcode execution with any user input.
+- **Configurable Tracing**: Allows for clean traces that excludes self-modifying instructions from the trace.
 
 ## Requirements
 
