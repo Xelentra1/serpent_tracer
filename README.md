@@ -2,7 +2,7 @@
 
 **Custom pin tracer tool for Challenge 9 from Flare-On 11**
 
-This tool is specifically designed to trace instructions for Challenge 9 from the Flare-On 11 challenge series. It stops tracing on the `hlt` instruction and resumes tracing on `call rax` when it jumps into shellcode. Also, it patches registers to `0` upon encountering a `test reg, reg` instruction within the shellcode to pass all flag checks, enabling the full execution of the shellcode.
+This tool is specifically designed to trace instructions for Challenge 9 from the Flare-On 11. It stops tracing on the `hlt` instruction and resumes tracing on `call rax` when it jumps into shellcode. Also, it patches registers to `0` upon encountering a `test reg, reg` instruction within the shellcode to pass all flag checks, enabling the full execution of the shellcode.
 
 ## Features
 
