@@ -233,41 +233,6 @@ VOID Instruction(INS ins, VOID* v) {
 	std::string addrStr = FormatAddress(addr);
 	bool addrStartsWith7FFF = (addrStr.substr(0, 6) == "0x7fff");
 
-	// Apply clean trace filtering before instrumenting `OnInstruction`
-	//if (!addrStartsWith7FFF) {
-	//	if (!g_stop_tracing && g_tracing_enabled) {
-	//		if (KnobCleanTrace) {
-	//			if (cleanTraceState == TRACE_UNTIL_CALL && INS_IsCall(ins)) {
-	//				cleanTraceState = SKIP_UNTIL_POP;
-	//				return;
-	//			}
-	//			else if (cleanTraceState == SKIP_UNTIL_POP) {
-	//				if (INS_Mnemonic(ins) == "POP" && INS_OperandReg(ins, 0) == REG_RAX) {
-	//					cleanTraceState = TRACE_ONE_AFTER_POP;
-	//				}
-	//				return;
-	//			}
-	//			else if (cleanTraceState == TRACE_ONE_AFTER_POP) {
-	//				cleanTraceState = SKIP_UNTIL_RET;
-	//			}
-	//			else if (cleanTraceState == SKIP_UNTIL_RET) {
-	//				if (INS_IsRet(ins)) {
-	//					cleanTraceState = TRACE_UNTIL_CALL;
-	//				}
-	//				return;
-	//			}
-	//		}
-	//
-	//		BOOL hasMemoryOperand = INS_OperandCount(ins) > 1 && INS_OperandIsMemory(ins, 1);
-	//		if (INS_IsMemoryRead(ins)) {
-	//			INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)OnInstruction, IARG_INST_PTR, IARG_MEMORYREAD_EA, IARG_BOOL, true, IARG_END);
-	//		}
-	//		else {
-	//			INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)OnInstruction, IARG_INST_PTR, IARG_ADDRINT, 0, IARG_BOOL, false, IARG_END);
-	//		}
-	//	}
-	//}
-
 	if (!addrStartsWith7FFF && !g_stop_tracing) {
 		if (KnobCleanTrace) {
 			if (cleanTraceState == TRACE_UNTIL_CALL && INS_IsCall(ins)) {
