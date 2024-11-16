@@ -1,7 +1,7 @@
 ﻿cl : Command line warning D9002: ignoring unknown option '/FP:strict'
   serpent_tracer.cpp
-c:\pin\source\tools\serpent_tracer\serpent_tracer.cpp(127): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
-c:\pin\source\tools\serpent_tracer\serpent_tracer.cpp(145): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
+c:\pin\source\tools\serpent_tracer\serpent_tracer.cpp(148): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
+c:\pin\source\tools\serpent_tracer\serpent_tracer.cpp(166): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
      Creating library C:\pin\source\tools\serpent_tracer\x64\Release\serpent_tracer.lib and object C:\pin\source\tools\serpent_tracer\x64\Release\serpent_tracer.exp
 LINK : warning LNK4281: undesirable base address 0xC5000000 for x64 image; set base address above 4GB for best ASLR optimization
 crtbeginS.obj : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
@@ -16,6 +16,7 @@ pin.lib(ins_api_xed_ia32.cpp.obj) : warning LNK4210: .CRT section exists; there 
 pin.lib(operand_ia32.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
 pin.lib(pin_client.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
 pin.lib(pin_client_replay.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
+pin.lib(tls_client.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
 pin.lib(image.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
 pin.lib(internal_exception_client.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
 pin.lib(symbol_win.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
@@ -44,7 +45,6 @@ pin.lib(vmtool.cpp.obj) : warning LNK4210: .CRT section exists; there may be unh
 pin.lib(thread_client.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
 pin.lib(debugger_client.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
 pin.lib(opin_client.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
-pin.lib(tls_client.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
 pin.lib(child_process_client.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
 pin.lib(pin_jit.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators
 pin.lib(image_win.cpp.obj) : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators

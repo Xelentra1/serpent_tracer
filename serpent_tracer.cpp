@@ -55,22 +55,6 @@ std::string FormatAddress(ADDRINT addr) {
 	return ss.str();
 }
 
-// Determine if an instruction should be filtered in a clean trace
-bool IsTrashInstruction(INS ins) {
-	// Example "trash" conditions: filter out `nop`, `ret`, and some `mov` instructions in clean mode
-	if (INS_Mnemonic(ins) == "NOP" || INS_Mnemonic(ins) == "RET") {
-		return true;
-	}
-
-	// Optionally filter out `mov` instructions that move between similar registers
-	if (INS_Mnemonic(ins) == "MOV" && INS_OperandIsReg(ins, 0) && INS_OperandIsReg(ins, 1)) {
-		if (INS_OperandReg(ins, 0) == INS_OperandReg(ins, 1)) {
-			return true;
-		}
-	}
-	return false;
-}
-
 // Exception handling callback
 EXCEPT_HANDLING_RESULT ExceptionHandler(THREADID tid, EXCEPTION_INFO* pExceptInfo,
 	PHYSICAL_CONTEXT* pPhysCtxt, VOID* v) {
@@ -90,8 +74,45 @@ EXCEPT_HANDLING_RESULT ExceptionHandler(THREADID tid, EXCEPTION_INFO* pExceptInf
 	return EHR_UNHANDLED;
 }
 
+// Thread-local storage key
+TLS_KEY mulOperandKey;
+
+struct MulOperandInfo {
+	ADDRINT memAddr;    
+	UINT64 memValue;    
+	UINT64 result;       
+	bool isValid;       
+};
+
+// Modify the SaveMulOperandInfo function to safely handle memory access
+VOID SaveMulOperandInfo(THREADID tid, ADDRINT memAddr) {
+	MulOperandInfo* info = static_cast<MulOperandInfo*>(PIN_GetThreadData(mulOperandKey, tid));
+	if (!info) return;
+
+	info->memAddr = memAddr;
+	info->isValid = false;
+
+	// Safely read the memory value
+	if (memAddr != 0) {
+		UINT64 value = 0;
+		size_t bytesRead = PIN_SafeCopy(&value, reinterpret_cast<VOID*>(memAddr), sizeof(UINT64));
+		if (bytesRead == sizeof(UINT64)) {
+			info->memValue = value;
+			info->isValid = true;
+		}
+	}
+}
+
+// Add a function to capture the MUL result
+VOID SaveMulResult(THREADID tid, UINT64 result) {
+	MulOperandInfo* info = static_cast<MulOperandInfo*>(PIN_GetThreadData(mulOperandKey, tid));
+	if (!info) return;
+	info->result = result;
+}
+
+
 // Analysis routine for instruction execution
-VOID PIN_FAST_ANALYSIS_CALL OnInstruction(VOID* ip, ADDRINT memAddr, BOOL hasMemoryOperand) {
+VOID PIN_FAST_ANALYSIS_CALL OnInstruction(VOID* ip, ADDRINT memAddr, BOOL hasMemoryOperand, BOOL isMul, THREADID tid) {
 	if (!g_tracing_enabled) return;
 
 	ADDRINT addr = reinterpret_cast<ADDRINT>(ip);
@@ -149,7 +170,19 @@ VOID PIN_FAST_ANALYSIS_CALL OnInstruction(VOID* ip, ADDRINT memAddr, BOOL hasMem
 				ss << std::string(spacesToAdd2, ' '); // Append the necessary spaces
 			}
 
-			ss << "| [" << std::hex << memAddr << "] = " << std::hex << memValue;
+			if (isMul) {
+				MulOperandInfo* info = static_cast<MulOperandInfo*>(PIN_GetThreadData(mulOperandKey, tid));
+				if (info && info->isValid) {
+					ss << "| [" << std::hex << info->memAddr << "] = "
+						<< std::hex << info->memValue << ", result = " << info->result;
+				}
+				else {
+					ss << "| invalid memory access";
+				}
+			} 
+			else {
+				ss << "| [" << std::hex << memAddr << "] = " << std::hex << memValue;
+			}
 		}
 	}
 	LogTrace(ss.str());
@@ -182,6 +215,21 @@ enum CleanTraceState {
 };
 
 CleanTraceState cleanTraceState = TRACE_UNTIL_CALL;
+
+VOID ThreadStart(THREADID tid, CONTEXT* ctxt, INT32 flags, VOID* v) {
+	MulOperandInfo* info = new MulOperandInfo();
+	info->memAddr = 0;
+	info->memValue = 0;
+	info->result = 0;    
+	info->isValid = false;  
+	PIN_SetThreadData(mulOperandKey, info, tid);
+}
+
+VOID ThreadFini(THREADID tid, const CONTEXT* ctxt, INT32 code, VOID* v) {
+	MulOperandInfo* info = static_cast<MulOperandInfo*>(PIN_GetThreadData(mulOperandKey, tid));
+	delete info;
+	PIN_SetThreadData(mulOperandKey, nullptr, tid);
+}
 
 // Instrument instruction
 VOID Instruction(INS ins, VOID* v) {
@@ -256,13 +304,26 @@ VOID Instruction(INS ins, VOID* v) {
 			}
 		}
 
-		BOOL hasMemoryOperand = INS_OperandCount(ins) > 1 && INS_OperandIsMemory(ins, 1);
-		if (INS_IsMemoryRead(ins)) {
-			INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)OnInstruction, IARG_INST_PTR, IARG_MEMORYREAD_EA, IARG_BOOL, true, IARG_END);
+		if (INS_Mnemonic(ins) == "MUL") {
+			if (INS_IsMemoryRead(ins)) {
+				INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)SaveMulOperandInfo, IARG_THREAD_ID, IARG_MEMORYREAD_EA, IARG_END);
+			}
+			else {
+				INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)SaveMulOperandInfo, IARG_THREAD_ID, IARG_ADDRINT, 0, IARG_END);
+			}
+			INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)SaveMulResult, IARG_THREAD_ID, IARG_REG_VALUE, REG_RAX, IARG_END);
+			INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)OnInstruction, IARG_FAST_ANALYSIS_CALL, IARG_INST_PTR, IARG_ADDRINT, 0, IARG_BOOL, true, IARG_BOOL, true, IARG_THREAD_ID, IARG_END);
 		}
 		else {
-			INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)OnInstruction, IARG_INST_PTR, IARG_ADDRINT, 0, IARG_BOOL, false, IARG_END);
+		    // BOOL hasMemoryOperand = INS_OperandCount(ins) > 1 && INS_OperandIsMemory(ins, 1);
+		    if (INS_IsMemoryRead(ins)) {
+		    	INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)OnInstruction, IARG_INST_PTR, IARG_MEMORYREAD_EA, IARG_BOOL, true, IARG_BOOL, false, IARG_THREAD_ID, IARG_END);
+		    }
+		    else {
+		    	INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)OnInstruction, IARG_INST_PTR, IARG_ADDRINT, 0, IARG_BOOL, false, IARG_BOOL, false, IARG_THREAD_ID, IARG_END);
+		    }
 		}
+
 	}
 
 
@@ -298,6 +359,13 @@ int main(int argc, char* argv[]) {
 	InitializeLogging();  // Initialize logging with Pin lock
 
 	outFile = new std::ofstream(KnobOutputFile.Value().c_str());
+
+	// Initialize the TLS key for MUL operand info
+	mulOperandKey = PIN_CreateThreadDataKey(nullptr);
+
+	// Add callbacks for thread start/end
+	PIN_AddThreadStartFunction(ThreadStart, nullptr);
+	PIN_AddThreadFiniFunction(ThreadFini, nullptr);
 
 	PIN_AddInternalExceptionHandler(ExceptionHandler, NULL);
 	INS_AddInstrumentFunction(Instruction, 0);
