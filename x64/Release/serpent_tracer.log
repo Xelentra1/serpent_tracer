@@ -1,7 +1,7 @@
 ﻿cl : Command line warning D9002: ignoring unknown option '/FP:strict'
   serpent_tracer.cpp
-c:\pin\source\tools\serpent_tracer\serpent_tracer.cpp(148): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
-c:\pin\source\tools\serpent_tracer\serpent_tracer.cpp(166): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
+c:\pin\source\tools\serpent_tracer\serpent_tracer.cpp(210): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
+c:\pin\source\tools\serpent_tracer\serpent_tracer.cpp(228): warning C4267: 'initializing': conversion from 'size_t' to 'int', possible loss of data
      Creating library C:\pin\source\tools\serpent_tracer\x64\Release\serpent_tracer.lib and object C:\pin\source\tools\serpent_tracer\x64\Release\serpent_tracer.exp
 LINK : warning LNK4281: undesirable base address 0xC5000000 for x64 image; set base address above 4GB for best ASLR optimization
 crtbeginS.obj : warning LNK4210: .CRT section exists; there may be unhandled static initializers or terminators

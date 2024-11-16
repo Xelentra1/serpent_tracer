@@ -7,7 +7,6 @@
 
 PIN_LOCK logLock;  // Pin lock for thread-safe logging
 
-// Global variables
 std::ofstream* outFile = nullptr;
 
 bool g_tracing_enabled = false;
@@ -31,7 +30,7 @@ KNOB<bool> KnobCleanTrace(KNOB_MODE_WRITEONCE, "pintool",
 
 // Utility function to write trace
 VOID LogTrace(const std::string& msg) {
-	PIN_GetLock(&logLock, 1);  // Acquire lock
+	PIN_GetLock(&logLock, 1);
 
 	std::cout << msg << std::endl;
 	if (outFile && outFile->is_open()) {
@@ -39,7 +38,7 @@ VOID LogTrace(const std::string& msg) {
 		outFile->flush();
 	}
 
-	PIN_ReleaseLock(&logLock);  // Release lock
+	PIN_ReleaseLock(&logLock);
 }
 
 // Initialize logging and lock at program start
@@ -75,24 +74,35 @@ EXCEPT_HANDLING_RESULT ExceptionHandler(THREADID tid, EXCEPTION_INFO* pExceptInf
 }
 
 // Thread-local storage key
-TLS_KEY mulOperandKey;
+TLS_KEY mathOperandKey;
 
-struct MulOperandInfo {
+struct MathOperandInfo {
 	ADDRINT memAddr;    
 	UINT64 memValue;    
 	UINT64 result;       
 	bool isValid;       
 };
 
-// Modify the SaveMulOperandInfo function to safely handle memory access
-VOID SaveMulOperandInfo(THREADID tid, ADDRINT memAddr) {
-	MulOperandInfo* info = static_cast<MulOperandInfo*>(PIN_GetThreadData(mulOperandKey, tid));
+struct ANALYSIS_INFO {
+	BOOL hasReg;
+	ADDRINT regValue;
+	std::string regName;
+};
+
+
+VOID GetRegValue(ANALYSIS_INFO* info, ADDRINT regVal, REG reg) {
+	info->hasReg = TRUE;
+	info->regValue = regVal;
+	info->regName = REG_StringShort(reg);
+}
+
+VOID SaveMathOperandInfo(THREADID tid, ADDRINT memAddr) {
+	MathOperandInfo* info = static_cast<MathOperandInfo*>(PIN_GetThreadData(mathOperandKey, tid));
 	if (!info) return;
 
 	info->memAddr = memAddr;
 	info->isValid = false;
 
-	// Safely read the memory value
 	if (memAddr != 0) {
 		UINT64 value = 0;
 		size_t bytesRead = PIN_SafeCopy(&value, reinterpret_cast<VOID*>(memAddr), sizeof(UINT64));
@@ -103,16 +113,68 @@ VOID SaveMulOperandInfo(THREADID tid, ADDRINT memAddr) {
 	}
 }
 
-// Add a function to capture the MUL result
-VOID SaveMulResult(THREADID tid, UINT64 result) {
-	MulOperandInfo* info = static_cast<MulOperandInfo*>(PIN_GetThreadData(mulOperandKey, tid));
+VOID SaveMathResult(THREADID tid, UINT64 result) {
+	MathOperandInfo* info = static_cast<MathOperandInfo*>(PIN_GetThreadData(mathOperandKey, tid));
 	if (!info) return;
 	info->result = result;
 }
 
+// Function to set a register to zero (directly modifying register value)
+VOID SetRegisterToZero(VOID* reg_ref) {
+	*static_cast<ADDRINT*>(reg_ref) = 0;
+}
+
+enum CleanTraceState {
+	TRACE_UNTIL_CALL,
+	SKIP_UNTIL_POP,
+	TRACE_ONE_AFTER_POP,
+	SKIP_UNTIL_RET,
+	TRACE_ONE_AFTER_RET
+};
+
+CleanTraceState cleanTraceState = TRACE_UNTIL_CALL;
+
+VOID ThreadStart(THREADID tid, CONTEXT* ctxt, INT32 flags, VOID* v) {
+	MathOperandInfo* info = new MathOperandInfo();
+	info->memAddr = 0;
+	info->memValue = 0;
+	info->result = 0;
+	info->isValid = false;
+	PIN_SetThreadData(mathOperandKey, info, tid);
+}
+
+VOID ThreadFini(THREADID tid, const CONTEXT* ctxt, INT32 code, VOID* v) {
+	MathOperandInfo* info = static_cast<MathOperandInfo*>(PIN_GetThreadData(mathOperandKey, tid));
+	delete info;
+	PIN_SetThreadData(mathOperandKey, nullptr, tid);
+}
+
+BOOL IsSpecialRegister(REG reg) {
+	switch (reg) {
+	case REG_MXCSR:
+	case REG_EFLAGS:
+	case REG_FLAGS:
+	case REG_STATUS_FLAGS:
+		return TRUE;
+	default:
+		// Check if it's an XMM register
+		if (REG_is_xmm(reg)) {
+			return TRUE;
+		}
+		// Check if it's a YMM register
+		if (REG_is_ymm(reg)) {
+			return TRUE;
+		}
+		// Check if it's a ZMM register
+		if (REG_is_zmm(reg)) {
+			return TRUE;
+		}
+		return FALSE;
+	}
+}
 
 // Analysis routine for instruction execution
-VOID PIN_FAST_ANALYSIS_CALL OnInstruction(VOID* ip, ADDRINT memAddr, BOOL hasMemoryOperand, BOOL isMul, THREADID tid) {
+VOID PIN_FAST_ANALYSIS_CALL OnInstruction(VOID* ip, ADDRINT memAddr, BOOL hasMemoryOperand, BOOL isMath, THREADID tid, ANALYSIS_INFO* info) {
 	if (!g_tracing_enabled) return;
 
 	ADDRINT addr = reinterpret_cast<ADDRINT>(ip);
@@ -170,66 +232,24 @@ VOID PIN_FAST_ANALYSIS_CALL OnInstruction(VOID* ip, ADDRINT memAddr, BOOL hasMem
 				ss << std::string(spacesToAdd2, ' '); // Append the necessary spaces
 			}
 
-			if (isMul) {
-				MulOperandInfo* info = static_cast<MulOperandInfo*>(PIN_GetThreadData(mulOperandKey, tid));
-				if (info && info->isValid) {
-					ss << "| [" << std::hex << info->memAddr << "] = "
-						<< std::hex << info->memValue << ", result = " << info->result;
+			if (info->hasReg) {
+				ss << "| " << info->regName << " = " << std::hex << info->regValue;
+			}
+
+			if (isMath) {
+				MathOperandInfo* mathInfo = static_cast<MathOperandInfo*>(PIN_GetThreadData(mathOperandKey, tid));
+				if (mathInfo && mathInfo->isValid) {
+					ss << ", [" << std::hex << mathInfo->memAddr << "] = " << std::hex << mathInfo->memValue << ", result = " << mathInfo->result;
 				}
-				else {
-					ss << "| invalid memory access";
-				}
-			} 
+			}
 			else {
-				ss << "| [" << std::hex << memAddr << "] = " << std::hex << memValue;
+				ss << ", [" << std::hex << memAddr << "] = " << std::hex << memValue;
 			}
 		}
 	}
 	LogTrace(ss.str());
 }
 
-// Function to set a register to zero (directly modifying register value)
-VOID SetRegisterToZero(VOID* reg_ref) {
-	*static_cast<ADDRINT*>(reg_ref) = 0;
-}
-
-// Function to log the value at a memory address for instructions with a memory operand
-VOID LogMemOperandValue(ADDRINT addr, ADDRINT memAddr) {
-	// Read value at the memory operand address
-	ADDRINT memValue;
-	PIN_SafeCopy(&memValue, reinterpret_cast<VOID*>(memAddr), sizeof(ADDRINT));
-
-	// Log the value at the memory operand
-	std::stringstream ss;
-	ss << "Instruction at " << FormatAddress(addr)
-		<< " with memory operand at [" << std::hex << memAddr << "] = " << memValue;
-	LogTrace(ss.str());
-}
-
-enum CleanTraceState {
-	TRACE_UNTIL_CALL,
-	SKIP_UNTIL_POP,
-	TRACE_ONE_AFTER_POP,
-	SKIP_UNTIL_RET,
-	TRACE_ONE_AFTER_RET
-};
-
-CleanTraceState cleanTraceState = TRACE_UNTIL_CALL;
-
-VOID ThreadStart(THREADID tid, CONTEXT* ctxt, INT32 flags, VOID* v) {
-	MulOperandInfo* info = new MulOperandInfo();
-	info->memAddr = 0;
-	info->memValue = 0;
-	info->result = 0;    
-	info->isValid = false;  
-	PIN_SetThreadData(mulOperandKey, info, tid);
-}
-
-VOID ThreadFini(THREADID tid, const CONTEXT* ctxt, INT32 code, VOID* v) {
-	MulOperandInfo* info = static_cast<MulOperandInfo*>(PIN_GetThreadData(mulOperandKey, tid));
-	delete info;
-	PIN_SetThreadData(mulOperandKey, nullptr, tid);
-}
 
 // Instrument instruction
 VOID Instruction(INS ins, VOID* v) {
@@ -304,26 +324,40 @@ VOID Instruction(INS ins, VOID* v) {
 			}
 		}
 
-		if (INS_Mnemonic(ins) == "MUL") {
-			if (INS_IsMemoryRead(ins)) {
-				INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)SaveMulOperandInfo, IARG_THREAD_ID, IARG_MEMORYREAD_EA, IARG_END);
+		if (INS_IsMemoryRead(ins)) {
+			ANALYSIS_INFO* info = new ANALYSIS_INFO();
+			info->hasReg = FALSE;
+			info->regValue = 0;
+
+			REG regOp = REG_INVALID();
+			for (UINT32 i = 0; i < INS_OperandCount(ins); i++) {
+				if (INS_OperandIsReg(ins, i) && !INS_OperandIsMemory(ins, i)) {
+					regOp = INS_OperandReg(ins, i);
+					break;
+				}
+			}
+
+			if (REG_valid(regOp) && !IsSpecialRegister(regOp)) {
+				INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)GetRegValue, IARG_PTR, info, IARG_REG_VALUE, regOp, IARG_ADDRINT, regOp, IARG_END);
+			}
+
+			if (INS_Mnemonic(ins) == "MUL" || INS_Mnemonic(ins) == "SUB" || INS_Mnemonic(ins) == "XOR" || INS_Mnemonic(ins) == "ADD") {
+				INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)SaveMathOperandInfo, IARG_THREAD_ID, IARG_MEMORYREAD_EA, IARG_END);
+				INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)SaveMathResult, IARG_THREAD_ID, IARG_REG_VALUE, REG_RAX, IARG_END);
+				INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)OnInstruction, IARG_FAST_ANALYSIS_CALL, IARG_INST_PTR, IARG_ADDRINT, 0, IARG_BOOL, true, IARG_BOOL, true, IARG_THREAD_ID, IARG_PTR, info, IARG_END);
 			}
 			else {
-				INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)SaveMulOperandInfo, IARG_THREAD_ID, IARG_ADDRINT, 0, IARG_END);
+			    INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)OnInstruction, IARG_FAST_ANALYSIS_CALL, IARG_INST_PTR, IARG_MEMORYREAD_EA, IARG_BOOL, true, IARG_BOOL, false, IARG_THREAD_ID, IARG_PTR, info, IARG_END);
 			}
-			INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)SaveMulResult, IARG_THREAD_ID, IARG_REG_VALUE, REG_RAX, IARG_END);
-			INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)OnInstruction, IARG_FAST_ANALYSIS_CALL, IARG_INST_PTR, IARG_ADDRINT, 0, IARG_BOOL, true, IARG_BOOL, true, IARG_THREAD_ID, IARG_END);
+
 		}
 		else {
-		    // BOOL hasMemoryOperand = INS_OperandCount(ins) > 1 && INS_OperandIsMemory(ins, 1);
-		    if (INS_IsMemoryRead(ins)) {
-		    	INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)OnInstruction, IARG_INST_PTR, IARG_MEMORYREAD_EA, IARG_BOOL, true, IARG_BOOL, false, IARG_THREAD_ID, IARG_END);
-		    }
-		    else {
-		    	INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)OnInstruction, IARG_INST_PTR, IARG_ADDRINT, 0, IARG_BOOL, false, IARG_BOOL, false, IARG_THREAD_ID, IARG_END);
-		    }
-		}
+			ANALYSIS_INFO* info = new ANALYSIS_INFO();
+			info->hasReg = FALSE;
+			info->regValue = 0;
 
+			INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)OnInstruction, IARG_FAST_ANALYSIS_CALL, IARG_INST_PTR, IARG_ADDRINT, 0, IARG_BOOL, false, IARG_BOOL, false, IARG_THREAD_ID, IARG_PTR, info, IARG_END);
+		}
 	}
 
 
@@ -360,8 +394,8 @@ int main(int argc, char* argv[]) {
 
 	outFile = new std::ofstream(KnobOutputFile.Value().c_str());
 
-	// Initialize the TLS key for MUL operand info
-	mulOperandKey = PIN_CreateThreadDataKey(nullptr);
+	// Initialize the TLS key for math operand info
+	mathOperandKey = PIN_CreateThreadDataKey(nullptr);
 
 	// Add callbacks for thread start/end
 	PIN_AddThreadStartFunction(ThreadStart, nullptr);
@@ -377,5 +411,5 @@ int main(int argc, char* argv[]) {
 	return 0;
 }
 
-// pin.exe -smc_strict 1 -t serpent_tracer.dll -- serpentine.exe ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef
-// pin.exe -smc_strict 1 -t serpent_tracer.dll -clean 1 -- serpentine.exe ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef
+// pin.exe -smc_strict 1 -t serpent_tracer.dll -- serpentine.exe abcdefghijklmnopqrstuvwxyzABCDEF
+// pin.exe -smc_strict 1 -t serpent_tracer.dll -clean 1 -- serpentine.exe abcdefghijklmnopqrstuvwxyzABCDEF

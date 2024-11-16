@@ -1,0 +1,3 @@
+Pin: pin-3.31-98869-fa6f126a8
+Copyright 2002-2024 Intel Corporation.
+E:  c:\pin\source\tools\serpent_tracer\serpent_tracer.cpp:330: Invalid REG for IARG_REG_VALUE  reg: xmm1
